@@ -1,0 +1,275 @@
+/** @import must precede all other statements */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap");
+
+/* Tailwind CSS directives - these are processed by PostCSS */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /**
+   * Tailwind CSS theme - Space Theme
+   * tailwind.config.ts expects the following color variables to be expressed as HSL values.
+   * A different format will require also updating the theme in tailwind.config.ts.
+  */
+  :root {
+    /* Space Theme Colors */
+    --space-deep-black: 0 8% 5%; /* #000814 */
+    --space-very-dark-blue: 0 30% 12%; /* #001D3D */
+    --space-navy-blue: 0 40% 20%; /* #003566 */
+    --space-electric-blue: 200 100% 36%; /* #0077B6 */
+    --space-cyan-blue: 190 100% 42%; /* #00B4D8 */
+    --space-sky-blue-glow: 190 60% 75%; /* #90E0EF */
+    --space-white: 0 0% 100%; /* #FFFFFF */
+    --space-soft-light-blue: 190 60% 90%; /* #CAF0F8 */
+
+    --background: 0 8% 5%; /* Deep Space Black */
+    --foreground: 0 0% 100%; /* White text */
+
+    --card: 0 30% 12%; /* Very Dark Blue */
+    --card-foreground: 0 0% 100%;
+
+    --popover: 0 30% 12%;
+    --popover-foreground: 0 0% 100%;
+
+    --primary: 200 100% 36%; /* Electric Blue */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 0 40% 20%; /* Navy Blue */
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 0 30% 12%; /* Very Dark Blue */
+    --muted-foreground: 190 60% 75%; /* Sky Blue Glow */
+
+    --accent: 190 100% 42%; /* Cyan Blue */
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 0 40% 20%; /* Navy Blue */
+    --input: 0 40% 20%;
+    --ring: 200 100% 36%; /* Electric Blue */
+
+    --radius: 0.5rem;
+
+    --sidebar-background: 0 8% 5%; /* Deep Space Black */
+    --sidebar-foreground: 0 0% 100%;
+    --sidebar-primary: 200 100% 36%; /* Electric Blue */
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 0 30% 12%; /* Very Dark Blue */
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 0 40% 20%; /* Navy Blue */
+    --sidebar-ring: 200 100% 36%; /* Electric Blue */
+  }
+
+  .dark {
+    /* Keep the same space theme for dark mode */
+    --background: 0 8% 5%; /* Deep Space Black */
+    --foreground: 0 0% 100%; /* White text */
+
+    --card: 0 30% 12%; /* Very Dark Blue */
+    --card-foreground: 0 0% 100%;
+
+    --popover: 0 30% 12%;
+    --popover-foreground: 0 0% 100%;
+
+    --primary: 200 100% 36%; /* Electric Blue */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 0 40% 20%; /* Navy Blue */
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 0 30% 12%; /* Very Dark Blue */
+    --muted-foreground: 190 60% 75%; /* Sky Blue Glow */
+
+    --accent: 190 100% 42%; /* Cyan Blue */
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 0 40% 20%; /* Navy Blue */
+    --input: 0 40% 20%;
+    --ring: 200 100% 36%; /* Electric Blue */
+
+    --sidebar-background: 0 8% 5%; /* Deep Space Black */
+    --sidebar-foreground: 0 0% 100%;
+    --sidebar-primary: 200 100% 36%; /* Electric Blue */
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 0 30% 12%; /* Very Dark Blue */
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 0 40% 20%; /* Navy Blue */
+    --sidebar-ring: 200 100% 36%; /* Electric Blue */
+  }
+}
+
+@layer base {
+  * {
+    /* Tailwind @apply directive - processed by PostCSS */
+    @apply border-border;
+  }
+
+  body {
+    /* Tailwind @apply directive - processed by PostCSS */
+    @apply bg-background text-foreground antialiased font-sans;
+  }
+}
+
+/* Space-themed utilities for the homepage design */
+@layer utilities {
+  .space-bg {
+    background: 
+      radial-gradient(ellipse 1200px 600px at 50% 30%, rgba(0, 29, 61, 0.8) 0%, rgba(0, 8, 20, 0.9) 40%, #000814 100%),
+      radial-gradient(ellipse 800px 400px at 20% 70%, rgba(0, 53, 102, 0.6) 0%, transparent 60%),
+      radial-gradient(ellipse 1000px 500px at 80% 20%, rgba(0, 8, 20, 0.7) 0%, transparent 50%);
+    background-size: 100% 100%;
+    background-attachment: fixed;
+  }
+
+  .nebula-glow {
+    background: 
+      radial-gradient(ellipse 1000px 400px at 50% 40%, rgba(0, 180, 216, 0.4) 0%, rgba(0, 119, 182, 0.3) 30%, transparent 70%),
+      radial-gradient(ellipse 800px 300px at 30% 60%, rgba(0, 119, 182, 0.3) 0%, rgba(0, 53, 102, 0.2) 40%, transparent 70%),
+      radial-gradient(ellipse 600px 250px at 70% 20%, rgba(144, 224, 239, 0.25) 0%, rgba(0, 180, 216, 0.15) 30%, transparent 60%),
+      radial-gradient(ellipse 400px 200px at 90% 80%, rgba(0, 119, 182, 0.2) 0%, transparent 50%);
+  }
+
+  .cosmic-depth {
+    background: 
+      radial-gradient(ellipse 2000px 1000px at 50% 0%, rgba(0, 29, 61, 0.3) 0%, transparent 60%),
+      radial-gradient(ellipse 1500px 800px at 0% 100%, rgba(0, 53, 102, 0.2) 0%, transparent 70%),
+      radial-gradient(ellipse 1800px 900px at 100% 50%, rgba(0, 8, 20, 0.4) 0%, transparent 80%);
+    background-size: 100% 100%;
+    background-attachment: fixed;
+  }
+
+  .nebula-band {
+    background: 
+      linear-gradient(90deg, transparent 0%, rgba(0, 180, 216, 0.1) 20%, rgba(0, 119, 182, 0.2) 50%, rgba(0, 180, 216, 0.1) 80%, transparent 100%),
+      radial-gradient(ellipse 1200px 200px at 50% 50%, rgba(0, 180, 216, 0.15) 0%, transparent 70%);
+    background-size: 100% 100%;
+    background-attachment: fixed;
+  }
+
+  .cosmic-glow {
+    background: 
+      radial-gradient(ellipse 800px 400px at 30% 20%, rgba(0, 180, 216, 0.08) 0%, transparent 50%),
+      radial-gradient(ellipse 600px 300px at 70% 80%, rgba(0, 119, 182, 0.06) 0%, transparent 60%),
+      radial-gradient(ellipse 400px 200px at 50% 50%, rgba(144, 224, 239, 0.04) 0%, transparent 70%);
+    background-size: 100% 100%;
+    background-attachment: fixed;
+  }
+
+  .cosmic-gradient {
+    background: linear-gradient(135deg, #000814 0%, #001D3D 25%, #003566 50%, #0077B6 75%, #00B4D8 100%);
+  }
+
+  .electric-glow {
+    box-shadow: 0 0 20px rgba(0, 119, 182, 0.5), 0 0 40px rgba(0, 119, 182, 0.3), 0 0 60px rgba(0, 119, 182, 0.1);
+  }
+
+  .cyan-glow {
+    box-shadow: 0 0 20px rgba(0, 180, 216, 0.5), 0 0 40px rgba(0, 180, 216, 0.3), 0 0 60px rgba(0, 180, 216, 0.1);
+  }
+
+  .sky-glow {
+    box-shadow: 0 0 20px rgba(144, 224, 239, 0.4), 0 0 40px rgba(144, 224, 239, 0.2), 0 0 60px rgba(144, 224, 239, 0.1);
+  }
+
+  /* Animation keyframes */
+  @keyframes fadeInUp {
+    from {
+      opacity: 0;
+      transform: translateY(30px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes fadeInLeft {
+    from {
+      opacity: 0;
+      transform: translateX(-30px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  @keyframes fadeInRight {
+    from {
+      opacity: 0;
+      transform: translateX(30px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes twinkle {
+    0%, 100% {
+      opacity: 0.3;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+
+  @keyframes float {
+    0%, 100% {
+      transform: translateY(0px);
+    }
+    50% {
+      transform: translateY(-10px);
+    }
+  }
+
+  @keyframes pulse-glow {
+    0%, 100% {
+      box-shadow: 0 0 20px rgba(0, 119, 182, 0.3), 0 0 40px rgba(0, 119, 182, 0.1);
+    }
+    50% {
+      box-shadow: 0 0 30px rgba(0, 119, 182, 0.6), 0 0 60px rgba(0, 119, 182, 0.3);
+    }
+  }
+
+  @keyframes fadeOut {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+    }
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  .star-fade-out {
+    animation: fadeOut 0.5s ease-out forwards;
+  }
+
+  .star-fade-in {
+    animation: fadeIn 0.8s ease-in forwards;
+  }
+}
