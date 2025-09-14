@@ -53,7 +53,7 @@ class UserService {
         lastLogin: new Date().toISOString(),
         isActive: true,
         preferences: {
-          emailProvider: 'emailjs', // Default to EmailJS
+          emailProvider: 'gmail', // Default to Gmail
           notifications: true,
           theme: 'light'
         }
@@ -152,7 +152,6 @@ class UserService {
       this.users.delete(userId);
 
       // Remove associated email configurations
-      this.emailConfigs.delete(`${userId}_emailjs`);
       this.emailConfigs.delete(`${userId}_gmail`);
 
       // Remove rate limit data

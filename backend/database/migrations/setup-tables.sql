@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS users (
   grade VARCHAR(100),
   interests TEXT[], -- Array of interests
   resume JSONB, -- Store resume data as JSON
-  preferences JSONB DEFAULT '{"emailProvider": "emailjs", "notifications": true, "theme": "light"}',
+  preferences JSONB DEFAULT '{"emailProvider": "gmail", "notifications": true, "theme": "light"}',
   is_active BOOLEAN DEFAULT true,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS email_configurations (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-  provider VARCHAR(50) NOT NULL, -- 'gmail' or 'emailjs'
+  provider VARCHAR(50) NOT NULL, -- 'gmail'
   config JSONB NOT NULL, -- Encrypted configuration data
   is_active BOOLEAN DEFAULT true,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS email_logs (
   recipient_email VARCHAR(255) NOT NULL,
   recipient_name VARCHAR(255),
   subject VARCHAR(500),
-  provider VARCHAR(50), -- 'gmail' or 'emailjs'
+  provider VARCHAR(50), -- 'gmail'
   status VARCHAR(50) DEFAULT 'sent', -- sent, delivered, bounced, etc.
   message_id VARCHAR(255), -- Provider's message ID
   error_message TEXT,

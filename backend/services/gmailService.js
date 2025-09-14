@@ -138,15 +138,19 @@ class GmailService {
         process.env.GOOGLE_REDIRECT_URI
       );
 
-      // Set credentials
+      // Set credentials with refresh token
       oauth2Client.setCredentials({
         refresh_token: config.refreshToken
       });
 
+      // Get fresh access token
+      const { credentials } = await oauth2Client.refreshAccessToken();
+      oauth2Client.setCredentials(credentials);
+
       // Create Gmail API client
       const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
-      // Format email content
+      // Format email content using proper MIME structure
       const emailContent = this.formatEmailForAPI(emailData, config.userEmail, professorEmail);
 
       // Send email using Gmail API
@@ -171,7 +175,7 @@ class GmailService {
     } catch (error) {
       console.error('Gmail API sending failed:', error.message);
 
-      // Handle common Gmail errors
+      // Handle common Gmail errors with better error messages
       if (error.message.includes('Invalid credentials') || error.message.includes('invalid_grant')) {
         throw new Error('Gmail authentication failed - please reconnect your Gmail account');
       }
@@ -181,28 +185,40 @@ class GmailService {
       if (error.message.includes('disabled') || error.message.includes('access_denied')) {
         throw new Error('Gmail API access disabled - please check your Google Cloud Console settings');
       }
+      if (error.message.includes('insufficient_scope')) {
+        throw new Error('Gmail permissions insufficient - please reconnect with proper permissions');
+      }
 
       throw new Error(`Failed to send email via Gmail: ${error.message}`);
     }
   }
 
   formatEmailForAPI(emailData, fromEmail, toEmail) {
-    // Create MIME email content for Gmail API
+    // Create MIME email content for Gmail API following RFC 2822
     const subject = emailData.subject;
     const body = this.formatEmailBody(emailData);
+    const fromName = emailData.fromName || 'Professor Matcher';
+    const replyTo = emailData.fromEmail || fromEmail;
 
+    // Create proper MIME structure
     const mimeEmail = [
-      'Content-Type: text/html; charset=utf-8',
-      'MIME-Version: 1.0',
+      `From: ${fromName} <${fromEmail}>`,
       `To: ${toEmail}`,
-      `From: ${emailData.fromName || 'Professor Matcher'} <${fromEmail}>`,
+      `Reply-To: ${replyTo}`,
       `Subject: ${subject}`,
+      'MIME-Version: 1.0',
+      'Content-Type: text/html; charset="UTF-8"',
+      'Content-Transfer-Encoding: 7bit',
       '',
       body
     ].join('\r\n');
 
-    // Base64 encode for Gmail API
-    return Buffer.from(mimeEmail).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    // Base64url encode for Gmail API (as per documentation)
+    return Buffer.from(mimeEmail)
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
   }
 
   formatEmailBody(emailData) {
@@ -334,6 +350,45 @@ class GmailService {
       console.error('Failed to get Gmail profile:', error.message);
       throw new Error(`Gmail profile fetch failed: ${error.message}`);
     }
+  }
+
+  // Enhanced method for sending emails with retry logic and better error handling
+  async sendEmailWithRetry(emailData, professorEmail, userConfig, maxRetries = 3) {
+    let lastError;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`Sending email attempt ${attempt}/${maxRetries} to: ${professorEmail}`);
+        
+        const result = await this.sendEmailViaAPI(emailData, professorEmail, userConfig);
+        
+        if (attempt > 1) {
+          console.log(`Email sent successfully on attempt ${attempt}`);
+        }
+        
+        return result;
+        
+      } catch (error) {
+        lastError = error;
+        console.error(`Attempt ${attempt} failed:`, error.message);
+        
+        // Don't retry for authentication errors
+        if (error.message.includes('authentication failed') || 
+            error.message.includes('permissions insufficient') ||
+            error.message.includes('access disabled')) {
+          throw error;
+        }
+        
+        // Wait before retry (exponential backoff)
+        if (attempt < maxRetries) {
+          const waitTime = Math.pow(2, attempt) * 1000; // 2s, 4s, 8s...
+          console.log(`Waiting ${waitTime}ms before retry...`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+        }
+      }
+    }
+    
+    throw lastError;
   }
 
   // Test method to verify Gmail connection

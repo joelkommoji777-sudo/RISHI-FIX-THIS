@@ -1,121 +1,79 @@
 const express = require('express');
 const router = express.Router();
-const supabaseService = require('../services/supabaseService');
-
-// POST /api/auth/register
-// Register a new user
-router.post('/register', async (req, res) => {
-  try {
-    const { email, name, grade, interests } = req.body;
-
-    if (!email || !name) {
-      return res.status(400).json({
-        error: 'Email and name are required',
-        success: false
-      });
-    }
-
-    // Create user ID from email (base64 encoded)
-    const userId = Buffer.from(email.toLowerCase()).toString('base64');
-
-    console.log(`📝 Registering user: ${email} (ID: ${userId})`);
-
-    // Check if user already exists
-    const existingUser = await supabaseService.getUser(userId);
-    if (existingUser) {
-      return res.status(409).json({
-        error: 'User already exists',
-        success: false
-      });
-    }
-
-    // Create new user
-    const userData = {
-      id: userId,
-      email: email.toLowerCase(),
-      name,
-      grade: grade || null,
-      interests: interests || [],
-      resume: null,
-      is_active: true
-    };
-
-    const newUser = await supabaseService.createUser(userData);
-
-    if (!newUser) {
-      console.error('❌ Supabase service returned null for user creation');
-      console.error('User data sent:', userData);
-      return res.status(500).json({
-        error: 'Failed to create user',
-        success: false
-      });
-    }
-
-    console.log(`✅ User registered successfully: ${newUser.id}`);
-
-    res.json({
-      success: true,
-      message: 'User registered successfully',
-      user: {
-        id: newUser.id,
-        email: newUser.email,
-        name: newUser.name,
-        grade: newUser.grade,
-        interests: newUser.interests
-      }
-    });
-
-  } catch (error) {
-    console.error('❌ Registration error:', error);
-    res.status(500).json({
-      error: 'Registration failed',
-      message: error.message,
-      success: false
-    });
-  }
-});
+const userService = require('../services/userService');
+const sessionService = require('../services/sessionService');
+const { authenticateUser, optionalAuth } = require('../middleware/auth');
 
 // POST /api/auth/login
-// Login user (for now, just verify they exist)
+// Login user and create session
 router.post('/login', async (req, res) => {
   try {
-    const { email } = req.body;
+    console.log('Login request received');
+    
+    const { email, name, grade, interests } = req.body;
 
     if (!email) {
       return res.status(400).json({
+        success: false,
         error: 'Email is required',
-        success: false
+        message: 'Please provide an email address'
       });
     }
 
-    // Create user ID from email
-    const userId = Buffer.from(email.toLowerCase()).toString('base64');
-
-    console.log(`🔐 Logging in user: ${email} (ID: ${userId})`);
-
-    // Get user from database
-    const user = await supabaseService.getUser(userId);
-
-    if (!user) {
-      return res.status(404).json({
-        error: 'User not found. Please register first.',
-        success: false
+    // Check if user exists, create if not
+    let user;
+    try {
+      // Try to find existing user by email
+      const existingUsers = await userService.getAllUsers();
+      user = existingUsers.find(u => u.email === email);
+      
+      if (!user) {
+        // Create new user
+        console.log(`Creating new user for email: ${email}`);
+        const userData = {
+          email,
+          name: name || '',
+          grade: grade || '',
+          interests: interests || [],
+          resume: null,
+          preferences: {
+            emailProvider: 'gmail',
+            notifications: true,
+            theme: 'light'
+          }
+        };
+        
+        const createResult = await userService.createUser(userData);
+        if (!createResult.success) {
+          throw new Error('Failed to create user');
+        }
+        
+        user = createResult.user;
+        console.log(`✅ New user created: ${user.id}`);
+      } else {
+        console.log(`✅ Existing user found: ${user.id}`);
+      }
+    } catch (userError) {
+      console.error('User creation/retrieval failed:', userError);
+      return res.status(500).json({
+        success: false,
+        error: 'User authentication failed',
+        message: 'Unable to authenticate user'
       });
     }
 
-    if (!user.is_active) {
-      return res.status(403).json({
-        error: 'Account is deactivated',
-        success: false
-      });
-    }
+    // Create session
+    const session = await sessionService.createSession(user.id, 24); // 24 hours
 
-    // Update last login
-    await supabaseService.updateUser(userId, {
-      last_login: new Date().toISOString()
+    // Set session cookie
+    res.cookie('sessionToken', session.session_token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 24 * 60 * 60 * 1000 // 24 hours
     });
 
-    console.log(`✅ User logged in successfully: ${user.id}`);
+    console.log(`✅ Session created for user ${user.id}`);
 
     res.json({
       success: true,
@@ -126,180 +84,270 @@ router.post('/login', async (req, res) => {
         name: user.name,
         grade: user.grade,
         interests: user.interests,
-        preferences: user.preferences,
-        last_login: user.last_login
+        preferences: user.preferences
+      },
+      session: {
+        token: session.session_token,
+        expiresAt: session.expires_at
       }
     });
 
   } catch (error) {
-    console.error('❌ Login error:', error);
+    console.error('Login error:', error);
     res.status(500).json({
+      success: false,
       error: 'Login failed',
-      message: error.message,
-      success: false
+      message: error.message
     });
   }
 });
 
-// GET /api/auth/profile/:userId
-// Get user profile
-router.get('/profile/:userId', async (req, res) => {
+// POST /api/auth/logout
+// Logout user and destroy session
+router.post('/logout', authenticateUser, async (req, res) => {
   try {
-    const { userId } = req.params;
-
-    console.log(`📋 Getting profile for user: ${userId}`);
-
-    const user = await supabaseService.getUser(userId);
-
-    if (!user) {
-      return res.status(404).json({
-        error: 'User not found',
-        success: false
-      });
-    }
+    const sessionToken = req.session.session_token;
+    
+    // Delete session
+    await sessionService.deleteSession(sessionToken);
+    
+    // Clear session cookie
+    res.clearCookie('sessionToken');
+    
+    console.log(`✅ User ${req.userId} logged out`);
 
     res.json({
       success: true,
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        grade: user.grade,
-        interests: user.interests,
-        preferences: user.preferences,
-        resume: user.resume,
-        created_at: user.created_at,
-        updated_at: user.updated_at,
-        last_login: user.last_login
-      }
+      message: 'Logout successful'
     });
 
   } catch (error) {
-    console.error('❌ Profile retrieval error:', error);
+    console.error('Logout error:', error);
     res.status(500).json({
-      error: 'Failed to get profile',
-      message: error.message,
-      success: false
+      success: false,
+      error: 'Logout failed',
+      message: error.message
     });
   }
 });
 
-// PUT /api/auth/profile/:userId
-// Update user profile
-router.put('/profile/:userId', async (req, res) => {
+// GET /api/auth/me
+// Get current user info
+router.get('/me', authenticateUser, async (req, res) => {
   try {
-    const { userId } = req.params;
-    const { name, grade, interests, preferences, resume } = req.body;
+    res.json({
+      success: true,
+      user: {
+        id: req.user.id,
+        email: req.user.email,
+        name: req.user.name,
+        grade: req.user.grade,
+        interests: req.user.interests,
+        preferences: req.user.preferences,
+        resume: req.user.resume,
+        created_at: req.user.created_at,
+        last_login: req.user.last_login
+      },
+      session: {
+        token: req.session.session_token,
+        expiresAt: req.session.expires_at,
+        lastActivity: req.session.last_activity
+      }
+    });
 
-    console.log(`📝 Updating profile for user: ${userId}`);
+  } catch (error) {
+    console.error('Get user info error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get user info',
+      message: error.message
+    });
+  }
+});
 
+// PUT /api/auth/profile
+// Update user profile
+router.put('/profile', authenticateUser, async (req, res) => {
+  try {
+    const { name, grade, interests, preferences } = req.body;
+    
     const updates = {};
     if (name !== undefined) updates.name = name;
     if (grade !== undefined) updates.grade = grade;
     if (interests !== undefined) updates.interests = interests;
     if (preferences !== undefined) updates.preferences = preferences;
-    if (resume !== undefined) updates.resume = resume;
 
-    const updatedUser = await supabaseService.updateUser(userId, updates);
-
-    if (!updatedUser) {
-      return res.status(500).json({
-        error: 'Failed to update profile',
-        success: false
-      });
+    const result = await userService.updateUser(req.userId, updates);
+    
+    if (!result.success) {
+      throw new Error('Failed to update profile');
     }
 
-    console.log(`✅ Profile updated for user: ${userId}`);
+    console.log(`✅ Profile updated for user ${req.userId}`);
 
     res.json({
       success: true,
       message: 'Profile updated successfully',
-      user: {
-        id: updatedUser.id,
-        email: updatedUser.email,
-        name: updatedUser.name,
-        grade: updatedUser.grade,
-        interests: updatedUser.interests,
-        preferences: updatedUser.preferences,
-        resume: updatedUser.resume
+      user: result.user
+    });
+
+  } catch (error) {
+    console.error('Profile update error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Profile update failed',
+      message: error.message
+    });
+  }
+});
+
+// POST /api/auth/refresh
+// Refresh session token
+router.post('/refresh', authenticateUser, async (req, res) => {
+  try {
+    const oldSessionToken = req.session.session_token;
+    
+    // Create new session
+    const newSession = await sessionService.createSession(req.userId, 24);
+    
+    // Delete old session
+    await sessionService.deleteSession(oldSessionToken);
+    
+    // Set new session cookie
+    res.cookie('sessionToken', newSession.session_token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 24 * 60 * 60 * 1000 // 24 hours
+    });
+
+    console.log(`✅ Session refreshed for user ${req.userId}`);
+
+    res.json({
+      success: true,
+      message: 'Session refreshed successfully',
+      session: {
+        token: newSession.session_token,
+        expiresAt: newSession.expires_at
       }
     });
 
   } catch (error) {
-    console.error('❌ Profile update error:', error);
+    console.error('Session refresh error:', error);
     res.status(500).json({
-      error: 'Failed to update profile',
-      message: error.message,
-      success: false
+      success: false,
+      error: 'Session refresh failed',
+      message: error.message
     });
   }
 });
 
-// DELETE /api/auth/profile/:userId
-// Delete user account
-router.delete('/profile/:userId', async (req, res) => {
+// GET /api/auth/sessions
+// Get user's active sessions
+router.get('/sessions', authenticateUser, async (req, res) => {
   try {
-    const { userId } = req.params;
+    const sessions = await sessionService.getUserSessions(req.userId);
+    
+    // Remove sensitive data
+    const safeSessions = sessions.map(session => ({
+      id: session.id,
+      created_at: session.created_at,
+      last_activity: session.last_activity,
+      expires_at: session.expires_at,
+      is_current: session.session_token === req.session.session_token
+    }));
 
-    console.log(`🗑️ Deleting user account: ${userId}`);
+    res.json({
+      success: true,
+      sessions: safeSessions
+    });
 
-    const deleted = await supabaseService.deleteUser(userId);
+  } catch (error) {
+    console.error('Get sessions error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get sessions',
+      message: error.message
+    });
+  }
+});
 
-    if (!deleted) {
-      return res.status(500).json({
-        error: 'Failed to delete account',
-        success: false
+// DELETE /api/auth/sessions/:sessionId
+// Delete a specific session
+router.delete('/sessions/:sessionId', authenticateUser, async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    
+    // Get user's sessions to verify ownership
+    const sessions = await sessionService.getUserSessions(req.userId);
+    const session = sessions.find(s => s.id === sessionId);
+    
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        error: 'Session not found',
+        message: 'Session not found or does not belong to user'
       });
     }
 
-    console.log(`✅ User account deleted: ${userId}`);
+    // Don't allow deleting current session
+    if (session.session_token === req.session.session_token) {
+      return res.status(400).json({
+        success: false,
+        error: 'Cannot delete current session',
+        message: 'Use logout to end current session'
+      });
+    }
+
+    await sessionService.deleteSession(session.session_token);
+
+    console.log(`✅ Session ${sessionId} deleted for user ${req.userId}`);
 
     res.json({
       success: true,
-      message: 'Account deleted successfully'
+      message: 'Session deleted successfully'
     });
 
   } catch (error) {
-    console.error('❌ Account deletion error:', error);
+    console.error('Delete session error:', error);
     res.status(500).json({
-      error: 'Failed to delete account',
-      message: error.message,
-      success: false
+      success: false,
+      error: 'Failed to delete session',
+      message: error.message
     });
   }
 });
 
-// GET /api/auth/users
-// Get all users (admin only - for debugging)
-router.get('/users', async (req, res) => {
+// GET /api/auth/status
+// Check authentication status (optional auth)
+router.get('/status', optionalAuth, async (req, res) => {
   try {
-    console.log('📊 Getting all users');
-
-    const users = await supabaseService.getAllUsers();
-
-    res.json({
-      success: true,
-      users: users.map(user => ({
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        grade: user.grade,
-        is_active: user.is_active,
-        created_at: user.created_at,
-        last_login: user.last_login
-      })),
-      count: users.length
-    });
+    if (req.user) {
+      res.json({
+        success: true,
+        authenticated: true,
+        user: {
+          id: req.user.id,
+          email: req.user.email,
+          name: req.user.name
+        }
+      });
+    } else {
+      res.json({
+        success: true,
+        authenticated: false,
+        message: 'Not authenticated'
+      });
+    }
 
   } catch (error) {
-    console.error('❌ Users retrieval error:', error);
+    console.error('Auth status check error:', error);
     res.status(500).json({
-      error: 'Failed to get users',
-      message: error.message,
-      success: false
+      success: false,
+      error: 'Auth status check failed',
+      message: error.message
     });
   }
 });
 
 module.exports = router;
-

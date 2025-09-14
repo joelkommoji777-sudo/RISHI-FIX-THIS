@@ -1,324 +1,212 @@
 const express = require('express');
+const router = express.Router();
 const { google } = require('googleapis');
 const userService = require('../services/userService');
-const router = express.Router();
 
-// GET /api/gmail/auth-url
-// Get OAuth authorization URL for Gmail
-router.post('/auth-url', async (req, res) => {
+// OAuth2 configuration
+const oauth2Client = new google.auth.OAuth2(
+  process.env.GOOGLE_CLIENT_ID,
+  process.env.GOOGLE_CLIENT_SECRET,
+  process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3000/oauth-callback'
+);
+
+// Initiate Gmail OAuth flow
+router.post('/auth', async (req, res) => {
   try {
-    const { userId, redirectUri } = req.body;
-
+    const { userId } = req.body;
+    
     if (!userId) {
       return res.status(400).json({
-        error: 'User ID is required',
-        success: false
+        success: false,
+        message: 'User ID is required'
       });
     }
 
-    console.log(`🔗 Generating Gmail OAuth URL for user: ${userId}`);
+    console.log(`🔐 Initiating Gmail OAuth for user: ${userId}`);
 
-    // Check if user exists
-    const user = await userService.getUser(userId);
-    if (!user) {
-      return res.status(404).json({
-        error: 'User not found. Please register first.',
-        success: false
-      });
-    }
-
-    // Create OAuth2 client with proper redirect URI
-    const finalRedirectUri = redirectUri || `${process.env.FRONTEND_URL || 'http://localhost:8080'}/oauth-callback.html`;
-    const oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-      finalRedirectUri
-    );
-
-    // Generate state parameter for security (include userId)
-    const state = Buffer.from(JSON.stringify({
-      userId: userId,
-      timestamp: Date.now()
-    })).toString('base64');
-
-    // Generate authorization URL
+    // Generate auth URL with necessary scopes
     const authUrl = oauth2Client.generateAuthUrl({
       access_type: 'offline',
+      prompt: 'consent', // Force consent to get refresh token
       scope: [
         'https://www.googleapis.com/auth/gmail.send',
-        'https://www.googleapis.com/auth/gmail.readonly'
+        'https://www.googleapis.com/auth/userinfo.email',
+        'https://www.googleapis.com/auth/userinfo.profile'
       ],
-      state: state,
-      prompt: 'consent' // Force consent screen to get refresh token
+      state: JSON.stringify({ userId })
     });
 
-    console.log(`✅ Gmail OAuth URL generated for user: ${userId}`);
+    console.log(`✅ Auth URL generated for user ${userId}`);
 
     res.json({
       success: true,
-      authUrl: authUrl,
-      message: 'OAuth URL generated successfully'
+      authUrl,
+      message: 'Please complete authorization in the popup window'
     });
 
   } catch (error) {
-    console.error('❌ Gmail auth URL generation error:', error);
+    console.error('Gmail auth initiation failed:', error);
     res.status(500).json({
-      error: 'Failed to generate OAuth URL',
-      message: error.message,
-      success: false
+      success: false,
+      message: 'Failed to initiate Gmail authorization',
+      error: error.message
     });
   }
 });
 
-// POST /api/gmail/oauth-callback
-// Handle OAuth callback and store tokens
+// Handle OAuth callback
 router.post('/oauth-callback', async (req, res) => {
   try {
-    const { code, state, redirectUri } = req.body;
-
-    if (!code || !state) {
+    const { code, state } = req.body;
+    
+    if (!code) {
       return res.status(400).json({
-        error: 'Authorization code and state are required',
-        success: false
+        success: false,
+        message: 'Authorization code is required'
       });
     }
 
-    console.log('🔄 Processing Gmail OAuth callback...');
+    // Parse state to get userId
+    const stateData = state ? JSON.parse(state) : { userId: 'default-user' };
+    const userId = stateData.userId;
 
-    // Decode state parameter
-    let decodedState;
-    try {
-      decodedState = JSON.parse(Buffer.from(state, 'base64').toString());
-    } catch (error) {
-      return res.status(400).json({
-        error: 'Invalid state parameter',
-        success: false
-      });
-    }
+    console.log(`🔄 Processing OAuth callback for user: ${userId}`);
 
-    const { userId } = decodedState;
-
-    if (!userId) {
-      return res.status(400).json({
-        error: 'User ID not found in state parameter',
-        success: false
-      });
-    }
-
-    console.log(`🔄 Processing OAuth for user: ${userId}`);
-
-    // Check if user exists
-    const user = await userService.getUser(userId);
-    if (!user) {
-      return res.status(404).json({
-        error: 'User not found. Please register first.',
-        success: false
-      });
-    }
-
-    // Create OAuth2 client with proper redirect URI
-    const finalRedirectUri = redirectUri || `${process.env.FRONTEND_URL || 'http://localhost:8080'}/oauth-callback.html`;
-    const oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-      finalRedirectUri
-    );
-
-    // Exchange authorization code for tokens
-    console.log('🔄 Exchanging authorization code for tokens...');
+    // Exchange code for tokens
     const { tokens } = await oauth2Client.getToken(code);
-
-    if (!tokens.access_token || !tokens.refresh_token) {
-      return res.status(400).json({
-        error: 'Failed to obtain access tokens',
-        success: false
-      });
-    }
-
-    // Set credentials to get user profile
-    oauth2Client.setCredentials(tokens);
-
-    // Get user profile information
-    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-    const profile = await gmail.users.getProfile({ userId: 'me' });
-
-    const userEmail = profile.data.emailAddress;
-
-    // Save Gmail configuration for user
-    const gmailConfig = {
-      access_token: tokens.access_token,
-      refresh_token: tokens.refresh_token,
-      expiry_date: tokens.expiry_date,
-      user_email: userEmail,
-      configured: true,
-      last_updated: new Date().toISOString()
-    };
-
-    console.log(`💾 Attempting to save Gmail config for user: ${userId}`);
-    console.log(`💾 Config data:`, {
-      user_email: userEmail,
-      has_access_token: !!tokens.access_token,
-      has_refresh_token: !!tokens.refresh_token,
-      configured: true
+    
+    console.log(`🎫 Tokens received:`, {
+      hasAccessToken: !!tokens.access_token,
+      hasRefreshToken: !!tokens.refresh_token,
+      expiryDate: tokens.expiry_date
     });
 
-    try {
-      const saveResult = await userService.saveGmailConfig(userId, gmailConfig);
-      console.log(`💾 Save result:`, saveResult);
+    // Set credentials to get user info
+    oauth2Client.setCredentials(tokens);
 
-      if (!saveResult || !saveResult.success) {
-        throw new Error('Failed to save Gmail configuration to database');
-      }
+    // Get user's email address
+    const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
+    const { data: userInfo } = await oauth2.userinfo.get();
 
-      console.log(`✅ Gmail configuration saved for user: ${userId} (${userEmail})`);
+    console.log(`📧 User email retrieved: ${userInfo.email}`);
 
-      res.json({
-        success: true,
-        message: 'Gmail connected successfully',
-        user: {
-          id: userId,
-          email: userEmail,
-          configured: true
-        }
-      });
+    // Prepare Gmail configuration
+    const gmailConfig = {
+      user_email: userInfo.email,
+      access_token: tokens.access_token,
+      refresh_token: tokens.refresh_token,
+      token_type: tokens.token_type || 'Bearer',
+      expiry_date: tokens.expiry_date,
+      configured: true,
+      connected_at: new Date().toISOString()
+    };
 
-    } catch (saveError) {
-      console.error('❌ Failed to save Gmail config:', saveError);
-      return res.status(500).json({
-        error: 'Failed to save Gmail configuration',
-        message: saveError.message,
-        success: false
-      });
+    // Save Gmail configuration using userService
+    console.log(`💾 Saving Gmail config for user ${userId}`);
+    const saveResult = await userService.saveGmailConfig(userId, gmailConfig);
+    
+    if (!saveResult.success) {
+      throw new Error('Failed to save Gmail configuration');
     }
 
+    console.log(`✅ Gmail successfully connected for user ${userId}`);
+
+    res.json({
+      success: true,
+      message: 'Gmail account connected successfully',
+      email: userInfo.email,
+      storage: saveResult.storage
+    });
+
   } catch (error) {
-    console.error('❌ Gmail OAuth callback error:', error);
+    console.error('OAuth callback processing failed:', error);
     res.status(500).json({
-      error: 'Failed to complete Gmail authentication',
-      message: error.message,
-      success: false
+      success: false,
+      message: 'Failed to complete Gmail authorization',
+      error: error.message
     });
   }
 });
 
-// POST /api/gmail/test-connection
-// Test Gmail connection for a user
-router.post('/test-connection', async (req, res) => {
+// Test Gmail connection
+router.get('/test/:userId', async (req, res) => {
   try {
-    const { userId } = req.body;
+    const { userId } = req.params;
+    
+    console.log(`🧪 Testing Gmail connection for user: ${userId}`);
 
-    if (!userId) {
-      return res.status(400).json({
-        error: 'User ID is required',
-        success: false
-      });
-    }
-
-    console.log(`🔍 Testing Gmail connection for user: ${userId}`);
-
-    // Get Gmail configuration for user
+    // Get user's Gmail configuration
     const gmailConfig = await userService.getGmailConfig(userId);
-
+    
     if (!gmailConfig || !gmailConfig.configured) {
       return res.status(404).json({
-        error: 'Gmail not configured for this user',
-        success: false
+        success: false,
+        message: 'Gmail not configured for this user'
       });
     }
 
-    // Create OAuth2 client with user's tokens
-    const oauth2Client = new google.auth.OAuth2(
+    // Test if we can refresh the access token
+    const testClient = new google.auth.OAuth2(
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET,
       process.env.GOOGLE_REDIRECT_URI
     );
 
-    // Set credentials
-    oauth2Client.setCredentials({
-      access_token: gmailConfig.access_token,
-      refresh_token: gmailConfig.refresh_token,
-      expiry_date: gmailConfig.expiry_date
+    testClient.setCredentials({
+      refresh_token: gmailConfig.refresh_token
     });
 
-    // Test connection by getting profile
-    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-    const profile = await gmail.users.getProfile({ userId: 'me' });
-
-    console.log(`✅ Gmail connection test successful for user: ${userId}`);
-
+    const { credentials } = await testClient.refreshAccessToken();
+    
     res.json({
       success: true,
-      message: 'Gmail connection test successful',
-      user: {
-        email: profile.data.emailAddress,
-        messagesTotal: profile.data.messagesTotal,
-        threadsTotal: profile.data.threadsTotal
-      }
+      message: 'Gmail connection is working',
+      email: gmailConfig.user_email,
+      tokenValid: !!credentials.access_token
     });
 
   } catch (error) {
-    console.error('❌ Gmail connection test error:', error);
-
-    // Check if it's a token refresh issue
-    if (error.message.includes('invalid_grant') || error.message.includes('access_denied')) {
-      // Try to refresh the token
-      try {
-        const gmailConfig = await userService.getGmailConfig(userId);
-
-        if (gmailConfig && gmailConfig.refresh_token) {
-          const oauth2Client = new google.auth.OAuth2(
-            process.env.GOOGLE_CLIENT_ID,
-            process.env.GOOGLE_CLIENT_SECRET,
-            process.env.GOOGLE_REDIRECT_URI
-          );
-
-          oauth2Client.setCredentials({
-            refresh_token: gmailConfig.refresh_token
-          });
-
-          const { credentials } = await oauth2Client.refreshAccessToken();
-          const { access_token, expiry_date } = credentials;
-
-          // Update stored tokens
-          await userService.saveGmailConfig(userId, {
-            ...gmailConfig,
-            access_token,
-            expiry_date,
-            last_updated: new Date().toISOString()
-          });
-
-          return res.json({
-            success: true,
-            message: 'Gmail tokens refreshed successfully',
-            refreshed: true
-          });
-        }
-      } catch (refreshError) {
-        console.error('❌ Token refresh failed:', refreshError);
-      }
-    }
-
+    console.error('Gmail connection test failed:', error);
     res.status(500).json({
-      error: 'Gmail connection test failed',
-      message: error.message,
-      success: false
+      success: false,
+      message: 'Gmail connection test failed',
+      error: error.message
     });
   }
 });
 
-// GET /api/gmail/config/:userId
-// Get Gmail configuration status for a user
-router.get('/config/:userId', async (req, res) => {
+// Disconnect Gmail
+router.post('/disconnect/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
+    
+    console.log(`🔌 Disconnecting Gmail for user: ${userId}`);
 
-    console.log(`📋 Getting Gmail config for user: ${userId}`);
+    const result = await userService.deleteGmailConfig(userId);
+    
+    res.json({
+      success: true,
+      message: 'Gmail disconnected successfully'
+    });
 
+  } catch (error) {
+    console.error('Gmail disconnect failed:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to disconnect Gmail',
+      error: error.message
+    });
+  }
+});
+
+// Get Gmail configuration status
+router.get('/status/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
     const gmailConfig = await userService.getGmailConfig(userId);
-    console.log(`📋 Gmail config retrieved:`, gmailConfig);
-
+    
     if (!gmailConfig || !gmailConfig.configured) {
-      console.log(`❌ No Gmail config found for user: ${userId}`);
       return res.json({
         success: true,
         configured: false,
@@ -326,60 +214,19 @@ router.get('/config/:userId', async (req, res) => {
       });
     }
 
-    // Check if access token is still valid
-    const now = Date.now();
-    const expiryDate = gmailConfig.expiry_date;
-    const isExpired = expiryDate && (now >= expiryDate);
-
     res.json({
       success: true,
       configured: true,
-      userEmail: gmailConfig.user_email,
-      isExpired: isExpired,
-      lastUpdated: gmailConfig.last_updated
+      email: gmailConfig.user_email,
+      connectedAt: gmailConfig.connected_at
     });
 
   } catch (error) {
-    console.error('❌ Gmail config retrieval error:', error);
+    console.error('Gmail status check failed:', error);
     res.status(500).json({
-      error: 'Failed to get Gmail configuration',
-      message: error.message,
-      success: false
-    });
-  }
-});
-
-// POST /api/gmail/test-save
-// Test endpoint to debug Gmail config saving
-router.post('/test-save', async (req, res) => {
-  try {
-    const { userId, gmailConfig } = req.body;
-
-    if (!userId || !gmailConfig) {
-      return res.status(400).json({
-        error: 'User ID and Gmail config are required',
-        success: false
-      });
-    }
-
-    console.log(`🧪 Testing Gmail config save for user: ${userId}`);
-    console.log(`🧪 Config data:`, gmailConfig);
-
-    const result = await userService.saveGmailConfig(userId, gmailConfig);
-    console.log(`🧪 Save result:`, result);
-
-    res.json({
-      success: true,
-      message: 'Test save completed',
-      result: result
-    });
-
-  } catch (error) {
-    console.error('❌ Test save error:', error);
-    res.status(500).json({
-      error: 'Test save failed',
-      message: error.message,
-      success: false
+      success: false,
+      message: 'Failed to check Gmail status',
+      error: error.message
     });
   }
 });

@@ -20,6 +20,9 @@ const emailRoutes = require('./routes/emails');
 const authRoutes = require('./routes/auth');
 const gmailRoutes = require('./routes/gmail');
 
+// Import middleware
+const { authenticateUser, optionalAuth, checkRateLimit, logActivity } = require('./middleware/auth');
+
 // Import services
 const userService = require('./services/userService');
 const hybridEmailService = require('./services/hybridEmailService');
@@ -131,31 +134,44 @@ async function extractResumeData(text) {
 
   try {
     const prompt = `
-Analyze the following resume text and extract structured information into JSON format.
+Analyze the following resume text and extract ALL information into a comprehensive JSON format.
 
-INSTRUCTIONS:
-- Extract all relevant information accurately and completely
-- If information is missing, use empty string or empty array
+CRITICAL INSTRUCTIONS:
+- Extract EVERY piece of information from the resume - nothing should be left out
+- Capture complete descriptions, bullet points, and all details without truncation
 - For dates, standardize to MM/YYYY format when possible
-- For bullet points, separate into individual array items
-- Identify achievements and quantifiable results separately
-- Separate school involvement (clubs, teams, organizations) from volunteering activities
-- Extract personal contact information when available
-- EXTRACT PROJECTS SECTION: Any projects listed should be treated as work experience entries
-- EXTRACT COMPLETE DESCRIPTIONS: Make sure to capture the full text of all descriptions, bullet points, and details
-- For projects, use "Personal Project" or "Academic Project" as the company name when not specified
-- Include all technologies, tools, methodologies, and outcomes mentioned in descriptions
+- Separate different types of activities into appropriate categories
+- Extract ALL projects, skills, achievements, and experiences
+- Include ALL technologies, tools, frameworks, and programming languages mentioned
+- Capture quantifiable results, metrics, and achievements
+- Extract ALL contact information, social media profiles, and personal details
 
-Return only this JSON structure:
+Return ONLY this JSON structure (no markdown, no code blocks):
 {
   "personal_info": {
     "name": "string",
     "linkedin": "string",
     "phone": "string",
     "email": "string",
-    "gpa": "string"
+    "gpa": "string",
+    "location": "string",
+    "website": "string",
+    "github": "string",
+    "portfolio": "string"
   },
-  "education": "string",
+  "education": [
+    {
+      "degree": "string",
+      "school": "string",
+      "location": "string",
+      "start_date": "string",
+      "end_date": "string",
+      "gpa": "string",
+      "relevant_coursework": ["string"],
+      "honors": ["string"],
+      "thesis": "string"
+    }
+  ],
   "experience": [
     {
       "title": "string",
@@ -163,16 +179,41 @@ Return only this JSON structure:
       "location": "string",
       "start_date": "string",
       "end_date": "string",
-      "description": ["string"]
+      "description": ["string"],
+      "technologies": ["string"],
+      "achievements": ["string"]
     }
   ],
+  "projects": [
+    {
+      "name": "string",
+      "description": "string",
+      "technologies": ["string"],
+      "start_date": "string",
+      "end_date": "string",
+      "url": "string",
+      "github": "string",
+      "achievements": ["string"],
+      "role": "string"
+    }
+  ],
+  "skills": {
+    "programming_languages": ["string"],
+    "frameworks": ["string"],
+    "tools": ["string"],
+    "databases": ["string"],
+    "cloud_platforms": ["string"],
+    "languages": ["string"],
+    "certifications": ["string"]
+  },
   "school_involvement": [
     {
       "organization": "string",
       "role": "string",
       "description": "string",
       "start_date": "string",
-      "end_date": "string"
+      "end_date": "string",
+      "achievements": ["string"]
     }
   ],
   "volunteering": [
@@ -181,50 +222,77 @@ Return only this JSON structure:
       "role": "string",
       "description": "string",
       "start_date": "string",
+      "end_date": "string",
+      "achievements": ["string"]
+    }
+  ],
+  "publications": [
+    {
+      "title": "string",
+      "authors": "string",
+      "journal": "string",
+      "date": "string",
+      "url": "string"
+    }
+  ],
+  "awards": [
+    {
+      "name": "string",
+      "organization": "string",
+      "date": "string",
+      "description": "string"
+    }
+  ],
+  "research": [
+    {
+      "title": "string",
+      "institution": "string",
+      "advisor": "string",
+      "description": "string",
+      "start_date": "string",
       "end_date": "string"
     }
   ]
 }
 
+EXTRACTION RULES:
+1. PROJECTS: Extract ALL projects from any section (Projects, Portfolio, Key Projects, etc.)
+2. SKILLS: Extract ALL technical skills, programming languages, tools, frameworks
+3. EXPERIENCE: Include work experience, internships, research positions, teaching
+4. EDUCATION: Extract ALL educational background including coursework, honors, thesis
+5. INVOLVEMENT: Extract ALL extracurricular activities, clubs, organizations, leadership roles
+6. VOLUNTEERING: Extract ALL volunteer work and community service
+7. PUBLICATIONS: Extract ALL papers, articles, presentations, patents
+8. AWARDS: Extract ALL honors, scholarships, recognitions, competitions
+9. RESEARCH: Extract ALL research experience, lab work, academic projects
+10. CONTACT: Extract ALL contact information, social profiles, websites
+
 IMPORTANT:
-- Extract ALL text from descriptions, bullet points, and project details
-- Do not truncate or summarize - include the complete original text
-- For projects without dates, use "Present" as end_date and estimate start_date if possible
-- Treat projects section as additional work experience entries
-- Capture all technologies, programming languages, frameworks, and tools mentioned
-- If a "Projects" section exists, convert each project to a work experience entry
-- Use descriptive titles for projects (e.g., "E-commerce Website Project", "Mobile App Development")
-- For project descriptions, include all implementation details, technologies used, and outcomes
+- Do NOT truncate any descriptions or bullet points
+- Include ALL technologies and tools mentioned
+- Capture ALL achievements and quantifiable results
+- Extract ALL dates and time periods
+- Include ALL URLs, links, and references
+- Preserve the original wording and details
+- If information spans multiple lines, combine it into complete descriptions
 
-PROJECT EXTRACTION RULES:
-- Look for sections titled "Projects", "Personal Projects", "Academic Projects", "Portfolio", "Key Projects", etc.
-- Convert each project into an experience entry with:
-  * Title: Project name or descriptive title (e.g., "E-commerce Website", "Mobile Task Manager App")
-  * Company: "Personal Project", "Academic Project", "Independent Project", or "Portfolio Project"
-  * Location: "Remote", "Online", or relevant location mentioned
-  * Description: Full project details, technologies, frameworks, languages, and outcomes
-  * Dates: Project timeline or "Present" if ongoing, or reasonable estimate based on context
-- If no dates are mentioned for projects, use "Present" as end_date and estimate start_date
-- Capture ALL technical details: programming languages, frameworks, databases, APIs, deployment methods, etc.
-- Include project outcomes, impact, and any quantitative results mentioned
-
-RESUME TEXT: ${text.substring(0, 6000)}
+RESUME TEXT: ${text.substring(0, 8000)}
 `;
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
+      model: "gpt-4o-mini",
       messages: [
         {
           role: "system",
-          content: "You are an expert at extracting structured information from resumes. Always return ONLY valid JSON without any markdown formatting, code blocks, or additional text. Do not wrap the JSON in ```json``` or any other formatting. Extract ALL project information and include it in the experience array. Capture complete descriptions without truncation."
+          content: "You are an expert resume parser. Extract ALL information from resumes into structured JSON. Never truncate descriptions. Always return valid JSON without markdown formatting. Capture every detail including projects, skills, achievements, and contact information."
         },
         {
           role: "user",
           content: prompt
         }
       ],
-      temperature: 0.3,
-      max_tokens: 1500,
+      temperature: 0.1,
+      max_tokens: 3000,
       response_format: { type: "json_object" }
     });
 
@@ -266,22 +334,71 @@ RESUME TEXT: ${text.substring(0, 6000)}
         console.error('Failed to parse cleaned response:', secondParseError.message);
         console.error('Final cleaned response:', cleanResponse);
 
-        // Return a fallback structure instead of throwing
+        // Return a comprehensive fallback structure
         extractedData = {
-          personal_info: { name: '', linkedin: '', phone: '', email: '', gpa: '' },
-          education: '',
+          personal_info: { 
+            name: '', linkedin: '', phone: '', email: '', gpa: '', 
+            location: '', website: '', github: '', portfolio: '' 
+          },
+          education: [],
           experience: [],
+          projects: [],
+          skills: {
+            programming_languages: [],
+            frameworks: [],
+            tools: [],
+            databases: [],
+            cloud_platforms: [],
+            languages: [],
+            certifications: []
+          },
           school_involvement: [],
           volunteering: [],
+          publications: [],
+          awards: [],
+          research: [],
           error: 'JSON parsing failed, returning empty structure'
         };
       }
     }
 
-    console.log('Final extracted data structure:', JSON.stringify(extractedData, null, 2));
-    console.log('Experience entries found:', extractedData.experience?.length || 0);
-    console.log('Projects extracted:', extractedData.experience?.filter(exp => exp.company?.toLowerCase().includes('project')).length || 0);
-    return extractedData;
+    // Ensure all arrays exist and are properly formatted
+    const processedData = {
+      personal_info: {
+        name: extractedData.personal_info?.name || '',
+        linkedin: extractedData.personal_info?.linkedin || '',
+        phone: extractedData.personal_info?.phone || '',
+        email: extractedData.personal_info?.email || '',
+        gpa: extractedData.personal_info?.gpa || '',
+        location: extractedData.personal_info?.location || '',
+        website: extractedData.personal_info?.website || '',
+        github: extractedData.personal_info?.github || '',
+        portfolio: extractedData.personal_info?.portfolio || ''
+      },
+      education: Array.isArray(extractedData.education) ? extractedData.education : [],
+      experience: Array.isArray(extractedData.experience) ? extractedData.experience : [],
+      projects: Array.isArray(extractedData.projects) ? extractedData.projects : [],
+      skills: {
+        programming_languages: Array.isArray(extractedData.skills?.programming_languages) ? extractedData.skills.programming_languages : [],
+        frameworks: Array.isArray(extractedData.skills?.frameworks) ? extractedData.skills.frameworks : [],
+        tools: Array.isArray(extractedData.skills?.tools) ? extractedData.skills.tools : [],
+        databases: Array.isArray(extractedData.skills?.databases) ? extractedData.skills.databases : [],
+        cloud_platforms: Array.isArray(extractedData.skills?.cloud_platforms) ? extractedData.skills.cloud_platforms : [],
+        languages: Array.isArray(extractedData.skills?.languages) ? extractedData.skills.languages : [],
+        certifications: Array.isArray(extractedData.skills?.certifications) ? extractedData.skills.certifications : []
+      },
+      school_involvement: Array.isArray(extractedData.school_involvement) ? extractedData.school_involvement : [],
+      volunteering: Array.isArray(extractedData.volunteering) ? extractedData.volunteering : [],
+      publications: Array.isArray(extractedData.publications) ? extractedData.publications : [],
+      awards: Array.isArray(extractedData.awards) ? extractedData.awards : [],
+      research: Array.isArray(extractedData.research) ? extractedData.research : []
+    };
+
+    console.log('Final extracted data structure:', JSON.stringify(processedData, null, 2));
+    console.log('Experience entries found:', processedData.experience?.length || 0);
+    console.log('Projects extracted:', processedData.projects?.length || 0);
+    console.log('Skills extracted:', Object.keys(processedData.skills).reduce((acc, key) => acc + processedData.skills[key].length, 0));
+    return processedData;
 
   } catch (error) {
     console.error('AI extraction error:', error);
@@ -290,7 +407,7 @@ RESUME TEXT: ${text.substring(0, 6000)}
 }
 
 // Resume extraction endpoint
-app.post('/api/resume/extract', upload.single('resume'), async (req, res) => {
+app.post('/api/resume/extract', upload.single('resume'), optionalAuth, checkRateLimit, logActivity('resume_upload'), async (req, res) => {
   try {
     console.log('Resume extraction request received');
 
@@ -337,14 +454,50 @@ app.post('/api/resume/extract', upload.single('resume'), async (req, res) => {
         linkedin: '',
         phone: '',
         email: '',
-        gpa: ''
+        gpa: '',
+        location: '',
+        website: '',
+        github: '',
+        portfolio: ''
       },
-      education: structuredData.education || '',
+      education: structuredData.education || [],
       experience: structuredData.experience || [],
+      projects: structuredData.projects || [],
+      skills: structuredData.skills || {
+        programming_languages: [],
+        frameworks: [],
+        tools: [],
+        databases: [],
+        cloud_platforms: [],
+        languages: [],
+        certifications: []
+      },
       school_involvement: structuredData.school_involvement || [],
       volunteering: structuredData.volunteering || [],
+      publications: structuredData.publications || [],
+      awards: structuredData.awards || [],
+      research: structuredData.research || [],
       success: true
     };
+
+    // If user is authenticated, save resume data to database
+    if (req.userId) {
+      try {
+        console.log(`Saving resume data to database for user ${req.userId}`);
+        const updateResult = await userService.updateUser(req.userId, {
+          resume: responseData
+        });
+        
+        if (updateResult.success) {
+          console.log(`✅ Resume data saved to database for user ${req.userId}`);
+        } else {
+          console.log(`⚠️ Failed to save resume data to database for user ${req.userId}`);
+        }
+      } catch (dbError) {
+        console.error('Database save failed:', dbError);
+        // Don't fail the request if database save fails
+      }
+    }
 
     console.log('Response data being sent:', JSON.stringify(responseData, null, 2));
     res.json(responseData);

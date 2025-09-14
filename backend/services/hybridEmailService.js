@@ -1,10 +1,8 @@
-const emailJSService = require('./emailJSService');
 const gmailService = require('./gmailService');
 
 class HybridEmailService {
   constructor() {
     this.providers = {
-      emailjs: emailJSService,
       gmail: gmailService,
     };
 
@@ -20,7 +18,7 @@ class HybridEmailService {
     return this._userService;
   }
 
-  async sendEmail(emailData, professorEmail, userId, preferredProvider = 'emailjs') {
+  async sendEmail(emailData, professorEmail, userId, preferredProvider = 'gmail') {
     try {
       console.log(`Sending email for user ${userId} using ${preferredProvider}`);
       console.log('Email data:', {
@@ -30,8 +28,8 @@ class HybridEmailService {
         to: professorEmail
       });
 
-      // Get user's preferred provider (default to EmailJS)
-      const provider = await this.getUserProvider(userId, preferredProvider);
+      // Use Gmail as the primary provider
+      const provider = 'gmail';
       console.log(`Selected provider: ${provider}`);
 
       // Validate provider availability
@@ -39,42 +37,37 @@ class HybridEmailService {
         throw new Error(`Email provider ${provider} is not available`);
       }
 
-      // Send email using the selected provider
+      // Send email using Gmail
       let result;
-      if (provider === 'gmail') {
-        // Get user's Gmail configuration from database
-        try {
-          const configKey = `${userId}_gmail`;
-          let userConfig = this.userPreferences.get(configKey);
+      try {
+        const configKey = `${userId}_gmail`;
+        let userConfig = this.userPreferences.get(configKey);
 
-          // If not in cache, try database using new Gmail methods
-          if (!userConfig && this.userService?.useDatabase) {
-            try {
-              const dbConfig = await this.userService.getGmailConfig(userId);
-              if (dbConfig && dbConfig.configured) {
-                userConfig = dbConfig;
-                // Cache it for future use
-                this.userPreferences.set(configKey, userConfig);
-                console.log(`✅ Loaded Gmail config from database for user ${userId}`);
-              }
-            } catch (dbError) {
-              console.log(`Database check failed for user ${userId}:`, dbError.message);
+        // If not in cache, try database using new Gmail methods
+        if (!userConfig && this.userService?.useDatabase) {
+          try {
+            const dbConfig = await this.userService.getGmailConfig(userId);
+            if (dbConfig && dbConfig.configured) {
+              userConfig = dbConfig;
+              // Cache it for future use
+              this.userPreferences.set(configKey, userConfig);
+              console.log(`✅ Loaded Gmail config from database for user ${userId}`);
             }
+          } catch (dbError) {
+            console.log(`Database check failed for user ${userId}:`, dbError.message);
           }
+        }
 
-          if (userConfig) {
-            console.log(`📧 Sending email via Gmail API for user ${userId}`);
-            result = await this.providers[provider].sendEmailViaAPI(emailData, professorEmail, userConfig);
-          } else {
-            console.log(`⚠️ Gmail config not found for user ${userId}, using fallback`);
-            result = await this.providers[provider].sendEmail(emailData, professorEmail);
-          }
-        } catch (configError) {
-          console.error(`❌ Error getting Gmail config for user ${userId}:`, configError.message);
-          // Fallback to regular Gmail service (which will also fail, but with better error)
+        if (userConfig) {
+          console.log(`📧 Sending email via Gmail API for user ${userId}`);
+          result = await this.providers[provider].sendEmailWithRetry(emailData, professorEmail, userConfig);
+        } else {
+          console.log(`⚠️ Gmail config not found for user ${userId}, using fallback`);
           result = await this.providers[provider].sendEmail(emailData, professorEmail);
         }
-      } else {
+      } catch (configError) {
+        console.error(`❌ Error getting Gmail config for user ${userId}:`, configError.message);
+        // Fallback to regular Gmail service (which will also fail, but with better error)
         result = await this.providers[provider].sendEmail(emailData, professorEmail);
       }
 
@@ -89,26 +82,6 @@ class HybridEmailService {
 
     } catch (error) {
       console.error(`Email send failed for user ${userId}:`, error.message);
-
-      // Try fallback provider if primary fails
-      if (preferredProvider !== 'emailjs') {
-        console.log('Trying fallback to EmailJS...');
-        try {
-          const fallbackResult = await this.providers.emailjs.sendEmail(emailData, professorEmail);
-          this.logEmailSend(userId, 'emailjs', fallbackResult);
-
-          return {
-            ...fallbackResult,
-            provider: 'emailjs',
-            userId: userId,
-            fallback: true,
-            originalError: error.message
-          };
-        } catch (fallbackError) {
-          console.error('Fallback also failed:', fallbackError.message);
-        }
-      }
-
       throw new Error(`Email sending failed: ${error.message}`);
     }
   }
@@ -133,22 +106,11 @@ class HybridEmailService {
         }
       }
 
-      // If Gmail is configured and available, use it as primary
-      if (this.providers.gmail && userGmailConfig && userGmailConfig.configured) {
-        return 'gmail';
-      }
-
-      // If user explicitly prefers Gmail but it's not configured, fall back to EmailJS
-      if (preferredProvider === 'gmail' && (!userGmailConfig || !userGmailConfig.configured)) {
-        console.log(`Gmail requested for user ${userId} but not configured, using EmailJS`);
-        return 'emailjs';
-      }
-
-      // Default to EmailJS for reliability
-      return 'emailjs';
+      // Always use Gmail as the primary provider
+      return 'gmail';
     } catch (error) {
       console.error(`Error getting provider for user ${userId}:`, error);
-      return 'emailjs'; // Safe fallback
+      return 'gmail'; // Default to Gmail
     }
   }
 
@@ -156,41 +118,23 @@ class HybridEmailService {
     try {
       console.log(`Configuring ${provider} for user ${userId}`);
 
-      switch (provider) {
-        case 'emailjs':
-          // Validate EmailJS configuration
-          if (!config.serviceId || !config.templateId || !config.publicKey) {
-            throw new Error('EmailJS configuration incomplete');
-          }
+      if (provider === 'gmail') {
+        // Validate Gmail OAuth configuration
+        if (!config.clientId || !config.clientSecret || !config.refreshToken) {
+          throw new Error('Gmail OAuth configuration incomplete');
+        }
 
-          // Store user-specific EmailJS configuration
-          this.userPreferences.set(`${userId}_emailjs`, config);
+        // Store user-specific Gmail configuration
+        this.userPreferences.set(`${userId}_gmail`, config);
 
-          return {
-            success: true,
-            provider: 'emailjs',
-            configured: true,
-            message: 'EmailJS configured successfully'
-          };
-
-        case 'gmail':
-          // Validate Gmail OAuth configuration
-          if (!config.clientId || !config.clientSecret || !config.refreshToken) {
-            throw new Error('Gmail OAuth configuration incomplete');
-          }
-
-          // Store user-specific Gmail configuration
-          this.userPreferences.set(`${userId}_gmail`, config);
-
-          return {
-            success: true,
-            provider: 'gmail',
-            configured: true,
-            message: 'Gmail OAuth configured successfully'
-          };
-
-        default:
-          throw new Error(`Unknown provider: ${provider}`);
+        return {
+          success: true,
+          provider: 'gmail',
+          configured: true,
+          message: 'Gmail OAuth configured successfully'
+        };
+      } else {
+        throw new Error(`Unknown provider: ${provider}`);
       }
 
     } catch (error) {
@@ -214,11 +158,6 @@ class HybridEmailService {
     // Get rate limits based on user's plan/subscription
     // In production, this would check user's subscription tier
     const baseLimits = {
-      emailjs: {
-        daily: 200,
-        monthly: 6000,
-        cooldown: 5
-      },
       gmail: {
         daily: 500,  // Gmail's daily sending limit
         monthly: 15000,
@@ -238,22 +177,11 @@ class HybridEmailService {
         };
       }
 
-      // Check if provider is operational
-      if (provider === 'emailjs') {
-        const status = await this.providers.emailjs.verifyConfiguration();
-        return {
-          available: status.configured,
-          message: status.message,
-          limits: this.providers.emailjs.getRateLimits(),
-          capabilities: this.providers.emailjs.getCapabilities()
-        };
-      }
-
       if (provider === 'gmail') {
         // Gmail status check would go here
         return {
-          available: false,
-          message: 'Gmail integration pending OAuth approval',
+          available: true,
+          message: 'Gmail integration ready',
           limits: { daily: 500, monthly: 15000, cooldown: 1 },
           capabilities: {
             htmlEmails: true,
